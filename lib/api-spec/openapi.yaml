@@ -1,0 +1,881 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: auth
+    description: Authentication
+  - name: barbers
+    description: Public barber profiles
+  - name: gallery
+    description: Gallery images
+  - name: content
+    description: Site content
+  - name: Storage
+    description: Object storage upload and serving endpoints
+  - name: admin
+    description: Admin management endpoints (requires admin role)
+  - name: barber
+    description: Barber self-service endpoints (requires barber role)
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /auth/me:
+    get:
+      operationId: getAuthMe
+      tags: [auth]
+      summary: Get current authenticated user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthUser"
+        "401":
+          description: Unauthorized
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login with username and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthUser"
+        "401":
+          description: Invalid credentials
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout current user
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+
+  /barbers:
+    get:
+      operationId: getBarbers
+      tags: [barbers]
+      summary: Get all active barbers with hours
+      responses:
+        "200":
+          description: List of barbers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BarberWithHours"
+
+  /gallery:
+    get:
+      operationId: getGallery
+      tags: [gallery]
+      summary: Get all gallery images
+      responses:
+        "200":
+          description: List of gallery images
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GalleryImage"
+
+  /site-content/{key}:
+    get:
+      operationId: getSiteContent
+      tags: [content]
+      summary: Get site content by key
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Content entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SiteContent"
+        "404":
+          description: Not found
+
+  /storage/uploads/request-url:
+    post:
+      tags: [Storage]
+      operationId: requestUploadUrl
+      summary: Request a presigned URL for file upload
+      description: |
+        Returns a presigned GCS URL for direct upload. The client sends JSON
+        metadata here, then uploads the file directly to the returned URL.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadUrlRequest"
+      responses:
+        "200":
+          description: Presigned upload URL generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadUrlResponse"
+        "400":
+          description: Missing or invalid required fields
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: Failed to generate upload URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /storage/public-objects/{filePath}:
+    get:
+      tags: [Storage]
+      operationId: getPublicObject
+      summary: Serve a public asset from PUBLIC_OBJECT_SEARCH_PATHS
+      parameters:
+        - name: filePath
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Object content streamed
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /storage/objects/{objectPath}:
+    get:
+      tags: [Storage]
+      operationId: getStorageObject
+      summary: Serve an object entity from PRIVATE_OBJECT_DIR
+      parameters:
+        - name: objectPath
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Object content streamed
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Object not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /admin/barbers:
+    get:
+      operationId: adminGetBarbers
+      tags: [admin]
+      summary: List all barbers (admin)
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: All barbers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminBarber"
+        "401":
+          description: Unauthorized
+    post:
+      operationId: adminCreateBarber
+      tags: [admin]
+      summary: Create a new barber
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BarberUpsert"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminBarber"
+        "401":
+          description: Unauthorized
+
+  /admin/barbers/{id}:
+    put:
+      operationId: adminUpdateBarber
+      tags: [admin]
+      summary: Update a barber
+      security: [{ session: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BarberUpsert"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminBarber"
+        "404":
+          description: Not found
+    delete:
+      operationId: adminDeleteBarber
+      tags: [admin]
+      summary: Delete a barber
+      security: [{ session: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+
+  /admin/barbers/{id}/hours:
+    get:
+      operationId: adminGetBarberHours
+      tags: [admin]
+      summary: Get hours for a barber (admin)
+      security: [{ session: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Hours list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BarberHours"
+    put:
+      operationId: adminUpdateBarberHours
+      tags: [admin]
+      summary: Update hours for a barber (admin)
+      security: [{ session: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/HoursUpsert"
+      responses:
+        "200":
+          description: Updated hours
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BarberHours"
+
+  /admin/content/{key}:
+    put:
+      operationId: adminUpdateContent
+      tags: [admin]
+      summary: Update site content by key
+      security: [{ session: [] }]
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                value:
+                  type: string
+              required: [value]
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SiteContent"
+
+  /admin/gallery:
+    get:
+      operationId: adminGetGallery
+      tags: [admin]
+      summary: Get all gallery images (admin)
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: Gallery images
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GalleryImage"
+
+  /admin/gallery/{slot}:
+    put:
+      operationId: adminUpdateGallerySlot
+      tags: [admin]
+      summary: Upload or update a gallery slot
+      security: [{ session: [] }]
+      parameters:
+        - name: slot
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                alt:
+                  type: string
+              required: [url]
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slot:
+                    type: integer
+                  url:
+                    type: string
+                required: [slot, url]
+    delete:
+      operationId: adminDeleteGallerySlot
+      tags: [admin]
+      summary: Delete a gallery slot
+      security: [{ session: [] }]
+      parameters:
+        - name: slot
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+
+  /admin/users:
+    get:
+      operationId: adminGetUsers
+      tags: [admin]
+      summary: List all users
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminUser"
+    post:
+      operationId: adminCreateUser
+      tags: [admin]
+      summary: Create a user
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUser"
+
+  /admin/users/{id}/password:
+    put:
+      operationId: adminResetUserPassword
+      tags: [admin]
+      summary: Reset a user's password
+      security: [{ session: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+              required: [password]
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+
+  /admin/users/{id}:
+    delete:
+      operationId: adminDeleteUser
+      tags: [admin]
+      summary: Delete a user
+      security: [{ session: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+
+  /barber/me:
+    get:
+      operationId: getBarberMe
+      tags: [barber]
+      summary: Get the logged-in barber's own profile
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: Barber profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BarberWithHours"
+        "401":
+          description: Unauthorized
+
+  /barber/hours:
+    put:
+      operationId: updateBarberHours
+      tags: [barber]
+      summary: Update the logged-in barber's hours
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/HoursUpsert"
+      responses:
+        "200":
+          description: Updated hours
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BarberHours"
+        "401":
+          description: Unauthorized
+
+  /barber/walk-ins:
+    put:
+      operationId: updateBarberWalkIns
+      tags: [barber]
+      summary: Toggle walk-ins for the logged-in barber
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                walkInsOpen:
+                  type: boolean
+              required: [walkInsOpen]
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+        "401":
+          description: Unauthorized
+
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: connect.sid
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    AuthUser:
+      type: object
+      properties:
+        userId:
+          type: integer
+        role:
+          type: string
+          enum: [barber, admin]
+        barberId:
+          type: integer
+          nullable: true
+      required: [userId, role, barberId]
+
+    LoginRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+      required: [username, password]
+
+    BarberHours:
+      type: object
+      properties:
+        id:
+          type: integer
+        barberId:
+          type: integer
+        dayOfWeek:
+          type: integer
+        openTime:
+          type: string
+        closeTime:
+          type: string
+        isClosed:
+          type: boolean
+      required: [id, barberId, dayOfWeek, openTime, closeTime, isClosed]
+
+    HoursUpsert:
+      type: object
+      properties:
+        dayOfWeek:
+          type: integer
+          minimum: 0
+          maximum: 6
+        openTime:
+          type: string
+        closeTime:
+          type: string
+        isClosed:
+          type: boolean
+      required: [dayOfWeek, openTime, closeTime, isClosed]
+
+    BarberWithHours:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        title:
+          type: string
+        bio:
+          type: string
+        photoUrl:
+          type: string
+        specialties:
+          type: array
+          items:
+            type: string
+        accentColor:
+          type: string
+        active:
+          type: boolean
+        sortOrder:
+          type: integer
+        walkInsOpen:
+          type: boolean
+        hours:
+          type: array
+          items:
+            $ref: "#/components/schemas/BarberHours"
+      required: [id, name, title, bio, photoUrl, specialties, accentColor, active, sortOrder, walkInsOpen, hours]
+
+    AdminBarber:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        title:
+          type: string
+        bio:
+          type: string
+        photoUrl:
+          type: string
+        specialties:
+          type: array
+          items:
+            type: string
+        accentColor:
+          type: string
+        active:
+          type: boolean
+        sortOrder:
+          type: integer
+        walkInsOpen:
+          type: boolean
+      required: [id, name, title, bio, photoUrl, specialties, accentColor, active, sortOrder, walkInsOpen]
+
+    BarberUpsert:
+      type: object
+      properties:
+        name:
+          type: string
+        title:
+          type: string
+        bio:
+          type: string
+        photoUrl:
+          type: string
+        specialties:
+          type: array
+          items:
+            type: string
+        accentColor:
+          type: string
+        active:
+          type: boolean
+        sortOrder:
+          type: integer
+        walkInsOpen:
+          type: boolean
+
+    GalleryImage:
+      type: object
+      properties:
+        id:
+          type: integer
+        slot:
+          type: integer
+        url:
+          type: string
+        alt:
+          type: string
+      required: [id, slot, url, alt]
+
+    SiteContent:
+      type: object
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+      required: [key, value]
+
+    AdminUser:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        role:
+          type: string
+          enum: [barber, admin]
+        barberId:
+          type: integer
+          nullable: true
+      required: [id, username, role, barberId]
+
+    UserCreate:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+        role:
+          type: string
+          enum: [barber, admin]
+        barberId:
+          type: integer
+          nullable: true
+      required: [username, password, role]
+
+    UploadUrlRequest:
+      type: object
+      required: [name, size, contentType]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Original file name
+        size:
+          type: integer
+          minimum: 1
+          description: File size in bytes
+        contentType:
+          type: string
+          minLength: 1
+          description: MIME type of the file
+
+    UploadUrlResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL:
+          type: string
+          format: uri
+          description: Presigned GCS URL for PUT upload
+        objectPath:
+          type: string
+          description: Normalized object path (e.g. /objects/uploads/uuid). Store this in your database.
+        metadata:
+          $ref: "#/components/schemas/UploadUrlRequest"
+
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string

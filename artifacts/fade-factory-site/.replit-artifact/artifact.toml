@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Fade Factory ATL Website"
+version = "1.0.0"
+id = "artifacts/fade-factory-site"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24510
+
+[services.development]
+run = "pnpm --filter @workspace/fade-factory-site run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/fade-factory-site", "run", "build" ]
+publicDir = "artifacts/fade-factory-site/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24510"
+BASE_PATH = "/"

@@ -1,0 +1,68 @@
+modules = ["nodejs-24", "python-3.11", "postgresql-16"]
+
+[deployment]
+router = "application"
+deploymentTarget = "autoscale"
+
+[deployment.postBuild]
+args = ["pnpm", "store", "prune"]
+env = { "CI" = "true" }
+
+[workflows]
+runButton = "Project"
+
+[agent]
+stack = "PNPM_WORKSPACE"
+expertMode = true
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 20000
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 8081
+externalPort = 8081
+
+[[ports]]
+localPort = 8082
+externalPort = 3000
+
+[[ports]]
+localPort = 8083
+externalPort = 3003
+
+[[ports]]
+localPort = 8084
+externalPort = 3002
+
+[[ports]]
+localPort = 8085
+externalPort = 4200
+
+[[ports]]
+localPort = 8086
+externalPort = 5000
+
+[[ports]]
+localPort = 19822
+externalPort = 80
+
+[[ports]]
+localPort = 24510
+externalPort = 3001
+
+[userenv]
+
+[userenv.shared]
+BARBER_AKEEM_PHONE = "+16179059899"
+TWILIO_CONNECTION_ID = "conn_twilio_01KYNVH4QWHXPXX7AKS4CMSMBQ"
+
+[objectStorage]
+defaultBucketID = "replit-objstore-ba7f710a-f22c-4efe-8808-fba9e1617cd8"
+
+[nix]
+channel = "stable-25_05"
