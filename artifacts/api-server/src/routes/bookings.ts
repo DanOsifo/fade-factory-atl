@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { createCalendarEvent } from "../lib/googleCalendar.js";
 import { sendSms }            from "../lib/sms.js";
 import { logger }             from "../lib/logger.js";
+import { isValidBookingBody } from "../lib/validation.js";
 
 const router: IRouter = Router();
 
@@ -11,6 +12,10 @@ const BARBER_PHONES: Record<string, string | undefined> = {
   akeem: process.env["BARBER_AKEEM_PHONE"],
   jeff:  process.env["BARBER_JEFF_PHONE"],
 };
+
+const bookingAttempts = new Map<string, { count: number; windowStartedAt: number }>();
+const BOOKING_WINDOW_MS = 60 * 60 * 1000;
+const MAX_BOOKINGS_PER_IP = 5;
 
 interface BookingBody {
   service:     string;
@@ -39,7 +44,27 @@ function buildBarberSms(b: BookingBody): string {
 }
 
 router.post("/bookings", async (req, res) => {
-  const body = req.body as BookingBody;
+  if (!isValidBookingBody(req.body)) {
+    res.status(400).json({ error: "Invalid booking details" });
+    return;
+  }
+  const ip = req.ip ?? "unknown";
+  const now = Date.now();
+  if (bookingAttempts.size > 10_000) {
+    for (const [key, attempt] of bookingAttempts) {
+      if (now - attempt.windowStartedAt >= BOOKING_WINDOW_MS) bookingAttempts.delete(key);
+    }
+  }
+  const attempts = bookingAttempts.get(ip);
+  if (!attempts || now - attempts.windowStartedAt >= BOOKING_WINDOW_MS) {
+    bookingAttempts.set(ip, { count: 1, windowStartedAt: now });
+  } else if (attempts.count >= MAX_BOOKINGS_PER_IP) {
+    res.status(429).json({ error: "Too many booking attempts. Try again later." });
+    return;
+  } else {
+    attempts.count += 1;
+  }
+  const body = req.body as unknown as BookingBody;
 
   const missing = ["service", "price", "duration", "barber", "date", "time", "startIso", "endIso"].filter(
     (k) => !body[k as keyof BookingBody]

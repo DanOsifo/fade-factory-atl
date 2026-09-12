@@ -34,11 +34,12 @@ app.use(
         callback(null, false);
         return;
       }
-      const replitDomains = (process.env["REPLIT_DOMAINS"] ?? "").split(",").map(d => `https://${d.trim()}`).filter(Boolean);
+      const replitDomains = (process.env["REPLIT_DOMAINS"] ?? "")
+        .split(",")
+        .map((domain) => `https://${domain.trim()}`)
+        .filter((domain) => domain !== "https://");
       const trusted =
-        replitDomains.some(d => origin === d || origin.startsWith(d)) ||
-        /\.replit\.dev$/.test(origin) ||
-        /\.repl\.co$/.test(origin) ||
+        replitDomains.includes(origin) ||
         origin === "http://localhost:5173";
       callback(null, trusted);
     },

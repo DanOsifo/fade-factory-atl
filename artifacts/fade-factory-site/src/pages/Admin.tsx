@@ -158,6 +158,11 @@ export default function Admin() {
     const { uploadURL, objectPath } = await metaRes.json() as { uploadURL: string; objectPath: string };
     const uploadRes = await fetch(uploadURL, { method: "PUT", body: file, headers: { "Content-Type": file.type } });
     if (!uploadRes.ok) throw new Error("File upload failed");
+    const policyRes = await apiFetch("/storage/objects/policy", {
+      method: "POST",
+      body: JSON.stringify({ objectPath, visibility: "public" }),
+    });
+    if (!policyRes.ok) throw new Error("Failed to publish file");
     return `/api/storage${objectPath}`;
   }
 
@@ -298,7 +303,7 @@ export default function Admin() {
 
   async function resetUserPassword(id: number) {
     if (!resetPwValue || resetPwValue.length < 6) {
-      showToast("Password must be at least 6 characters");
+      showToast("Password must be at least 12 characters");
       return;
     }
     const r = await apiFetch(`/admin/users/${id}/password`, {
@@ -664,7 +669,7 @@ export default function Admin() {
                       <input
                         type="password"
                         className="flex-1 bg-white/5 border border-white/20 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-accent-red transition-colors"
-                        placeholder="New password (min 6 chars)"
+                        placeholder="New password (min 12 chars)"
                         value={resetPwValue}
                         onChange={(e) => setResetPwValue(e.target.value)}
                         onKeyDown={(e) => e.key === "Enter" && resetUserPassword(u.id)}
@@ -689,7 +694,7 @@ export default function Admin() {
               </div>
               <div>
                 <label className={labelCls}>Password</label>
-                <input type="password" className={inputCls} value={newUser.password} onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))} placeholder="password" />
+                <input type="password" minLength={12} className={inputCls} value={newUser.password} onChange={(e) => setNewUser((p) => ({ ...p, password: e.target.value }))} placeholder="password (min 12 chars)" />
               </div>
               <div>
                 <label className={labelCls}>Role</label>

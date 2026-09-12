@@ -2,13 +2,15 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { db } from "@workspace/db";
 import { usersTable } from "@workspace/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { allowLoginAttempt } from "../lib/auth";
 
 const router = Router();
 
 const MAX_FAILED_ATTEMPTS = 5;
 const ADMIN_MAX_FAILED_ATTEMPTS = 10; // admins get a higher threshold
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+const DUMMY_PASSWORD_HASH = "$2a$12$Y2pekRnc73r.Qpe4XoucXuDFJrjssWozKUwf4RSSRpKlT2J/LsuQW";
 
 router.post("/auth/login", async (req, res) => {
   const { username, password } = req.body as { username?: string; password?: string };
@@ -18,22 +20,25 @@ router.post("/auth/login", async (req, res) => {
     return;
   }
 
+  if (!allowLoginAttempt(req.ip ?? "unknown")) {
+    res.status(429).json({ error: "Too many login attempts. Try again shortly." });
+    return;
+  }
+
   const user = await db.query.usersTable.findFirst({
     where: eq(usersTable.username, username),
   });
 
   if (!user) {
+    await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
     res.status(401).json({ error: "Invalid username or password" });
     return;
   }
 
   // Check if account is currently locked
   if (user.lockedUntil && user.lockedUntil > new Date()) {
-    const minutesLeft = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60000);
-    res.status(423).json({
-      error: `Account locked due to too many failed attempts. Try again in ${minutesLeft} minute${minutesLeft !== 1 ? "s" : ""}.`,
-      lockedUntil: user.lockedUntil,
-    });
+    await bcrypt.compare(password, user.passwordHash);
+    res.status(401).json({ error: "Invalid username or password" });
     return;
   }
 
@@ -41,27 +46,25 @@ router.post("/auth/login", async (req, res) => {
 
   if (!passwordMatch) {
     const threshold = user.role === "admin" ? ADMIN_MAX_FAILED_ATTEMPTS : MAX_FAILED_ATTEMPTS;
-    const newFailedAttempts = (user.failedLoginAttempts ?? 0) + 1;
+    const [updatedUser] = await db
+      .update(usersTable)
+      .set({ failedLoginAttempts: sql`${usersTable.failedLoginAttempts} + 1` })
+      .where(eq(usersTable.id, user.id))
+      .returning({ failedLoginAttempts: usersTable.failedLoginAttempts });
+    const newFailedAttempts = updatedUser?.failedLoginAttempts ?? user.failedLoginAttempts + 1;
     const shouldLock = newFailedAttempts >= threshold;
     const lockedUntil = shouldLock ? new Date(Date.now() + LOCKOUT_DURATION_MS) : null;
 
-    await db.update(usersTable)
-      .set({
-        failedLoginAttempts: newFailedAttempts,
-        lockedUntil: lockedUntil ?? undefined,
-      })
-      .where(eq(usersTable.id, user.id));
+    if (shouldLock) {
+      await db.update(usersTable)
+        .set({ lockedUntil })
+        .where(eq(usersTable.id, user.id));
+    }
 
     if (shouldLock) {
-      res.status(423).json({
-        error: `Too many failed attempts. Account locked for 15 minutes.`,
-        lockedUntil,
-      });
+      res.status(401).json({ error: "Invalid username or password" });
     } else {
-      const attemptsLeft = threshold - newFailedAttempts;
-      res.status(401).json({
-        error: `Invalid username or password. ${attemptsLeft} attempt${attemptsLeft !== 1 ? "s" : ""} remaining before lockout.`,
-      });
+      res.status(401).json({ error: "Invalid username or password" });
     }
     return;
   }

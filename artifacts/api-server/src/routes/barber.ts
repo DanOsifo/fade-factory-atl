@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { barbersTable, barberHoursTable, usersTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { requireBarber } from "../lib/auth";
+import { isValidHours } from "../lib/validation";
 
 const router = Router();
 router.use(requireBarber);
@@ -40,18 +41,27 @@ router.put("/hours", async (req, res) => {
   }
 
   const hours = req.body as { dayOfWeek: number; openTime: string; closeTime: string; isClosed: boolean }[];
-
-  for (const h of hours) {
-    await db
-      .insert(barberHoursTable)
-      .values({ barberId, ...h })
-      .onConflictDoUpdate({
-        target: [barberHoursTable.barberId, barberHoursTable.dayOfWeek],
-        set: { openTime: h.openTime, closeTime: h.closeTime, isClosed: h.isClosed },
-      });
+  if (!isValidHours(hours)) {
+    res.status(400).json({ error: "Invalid hours" });
+    return;
   }
+  await db.transaction(async (tx) => {
+    for (const h of hours) {
+      await tx
+        .insert(barberHoursTable)
+        .values({ barberId, ...h })
+        .onConflictDoUpdate({
+          target: [barberHoursTable.barberId, barberHoursTable.dayOfWeek],
+          set: { openTime: h.openTime, closeTime: h.closeTime, isClosed: h.isClosed },
+        });
+    }
+  });
 
   const updated = await db.select().from(barberHoursTable).where(eq(barberHoursTable.barberId, barberId));
+        if (!isValidHours(hours)) {
+          res.status(400).json({ error: "Invalid hours" });
+          return;
+        }
   res.json(updated);
 });
 
@@ -67,8 +77,8 @@ router.put("/password", async (req, res) => {
     res.status(400).json({ error: "currentPassword and newPassword are required" });
     return;
   }
-  if (newPassword.length < 6) {
-    res.status(400).json({ error: "New password must be at least 6 characters" });
+  if (newPassword.length < 12 || newPassword.length > 200) {
+    res.status(400).json({ error: "New password must be between 12 and 200 characters" });
     return;
   }
 

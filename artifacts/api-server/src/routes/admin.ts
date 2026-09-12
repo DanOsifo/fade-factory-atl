@@ -10,6 +10,7 @@ import {
 } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
 import { requireAdmin } from "../lib/auth";
+import { isBoundedText, isOptionalText, isStringArray, isValidHours, isValidId, MAX_LONG_TEXT } from "../lib/validation";
 
 const router = Router();
 router.use(requireAdmin);
@@ -30,6 +31,13 @@ router.post("/barbers", async (req, res) => {
       accentColor?: string;
       sortOrder?: number;
     };
+
+  if (!isBoundedText(name) || !isBoundedText(title) || !isOptionalText(bio, MAX_LONG_TEXT) ||
+      !isOptionalText(photoUrl) || !isStringArray(specialties) ||
+      !isOptionalText(accentColor, 20) || (sortOrder !== undefined && !Number.isInteger(sortOrder))) {
+    res.status(400).json({ error: "Invalid barber details" });
+    return;
+  }
 
   const [barber] = await db
     .insert(barbersTable)
@@ -62,6 +70,16 @@ router.put("/barbers/:id", async (req, res) => {
       walkInsOpen?: boolean;
     };
 
+  if (!isValidId(id) || (name !== undefined && !isBoundedText(name)) ||
+      (title !== undefined && !isBoundedText(title)) || !isOptionalText(bio, MAX_LONG_TEXT) ||
+      !isOptionalText(photoUrl) || (specialties !== undefined && !isStringArray(specialties)) ||
+      !isOptionalText(accentColor, 20) || (active !== undefined && typeof active !== "boolean") ||
+      (sortOrder !== undefined && !Number.isInteger(sortOrder)) ||
+      (walkInsOpen !== undefined && typeof walkInsOpen !== "boolean")) {
+    res.status(400).json({ error: "Invalid barber details" });
+    return;
+  }
+
   const updates: Partial<typeof barbersTable.$inferInsert> = {};
   if (name !== undefined) updates.name = name;
   if (title !== undefined) updates.title = title;
@@ -83,6 +101,10 @@ router.put("/barbers/:id", async (req, res) => {
 
 router.delete("/barbers/:id", async (req, res) => {
   const id = Number(req.params["id"]);
+  if (!isValidId(id)) {
+    res.status(400).json({ error: "Invalid barber id" });
+    return;
+  }
   await db.delete(usersTable).where(eq(usersTable.barberId, id));
   await db.delete(barbersTable).where(eq(barbersTable.id, id));
   res.json({ ok: true });
@@ -90,6 +112,10 @@ router.delete("/barbers/:id", async (req, res) => {
 
 router.get("/barbers/:id/hours", async (req, res) => {
   const id = Number(req.params["id"]);
+  if (!isValidId(id)) {
+    res.status(400).json({ error: "Invalid barber id" });
+    return;
+  }
   const hours = await db
     .select()
     .from(barberHoursTable)
@@ -100,23 +126,31 @@ router.get("/barbers/:id/hours", async (req, res) => {
 router.put("/barbers/:id/hours", async (req, res) => {
   const barberId = Number(req.params["id"]);
   const hours = req.body as { dayOfWeek: number; openTime: string; closeTime: string; isClosed: boolean }[];
-
-  for (const h of hours) {
-    await db
-      .insert(barberHoursTable)
-      .values({ barberId, ...h })
-      .onConflictDoUpdate({
-        target: [barberHoursTable.barberId, barberHoursTable.dayOfWeek],
-        set: { openTime: h.openTime, closeTime: h.closeTime, isClosed: h.isClosed },
-      });
+  if (!isValidId(barberId) || !isValidHours(hours)) {
+    res.status(400).json({ error: "Invalid hours" });
+    return;
   }
-
+  await db.transaction(async (tx) => {
+    for (const h of hours) {
+      await tx
+        .insert(barberHoursTable)
+        .values({ barberId, ...h })
+        .onConflictDoUpdate({
+          target: [barberHoursTable.barberId, barberHoursTable.dayOfWeek],
+          set: { openTime: h.openTime, closeTime: h.closeTime, isClosed: h.isClosed },
+        });
+    }
+  });
   const updated = await db.select().from(barberHoursTable).where(eq(barberHoursTable.barberId, barberId));
   res.json(updated);
 });
 
 router.put("/content/:key", async (req, res) => {
   const { value } = req.body as { value: string };
+  if (!isBoundedText(req.params["key"], 100) || !isBoundedText(value, MAX_LONG_TEXT)) {
+    res.status(400).json({ error: "Invalid content" });
+    return;
+  }
   await db
     .insert(siteContentTable)
     .values({ key: req.params["key"]!, value })
@@ -132,6 +166,10 @@ router.get("/gallery", async (_req, res) => {
 router.put("/gallery/:slot", async (req, res) => {
   const slot = Number(req.params["slot"]);
   const { url, alt } = req.body as { url: string; alt?: string };
+  if (!Number.isInteger(slot) || slot < 1 || slot > 12 || !isBoundedText(url, 2_000) || !isOptionalText(alt, 500)) {
+    res.status(400).json({ error: "Invalid gallery image" });
+    return;
+  }
 
   await db
     .insert(galleryImagesTable)
@@ -169,6 +207,11 @@ router.post("/users", async (req, res) => {
     role: "barber" | "admin";
     barberId?: number;
   };
+  if (!isBoundedText(username, 100) || typeof password !== "string" || password.length < 12 || password.length > 200 ||
+      (role !== "admin" && role !== "barber") || (barberId !== undefined && !isValidId(barberId))) {
+    res.status(400).json({ error: "Invalid user details" });
+    return;
+  }
   const passwordHash = await bcrypt.hash(password, 12);
   const [user] = await db
     .insert(usersTable)
@@ -185,6 +228,10 @@ router.post("/users", async (req, res) => {
 router.put("/users/:id/password", async (req, res) => {
   const id = Number(req.params["id"]);
   const { password } = req.body as { password: string };
+  if (!isValidId(id) || typeof password !== "string" || password.length < 12 || password.length > 200) {
+    res.status(400).json({ error: "Invalid password" });
+    return;
+  }
   const passwordHash = await bcrypt.hash(password, 12);
   // Only passwordHash is set — lockout fields are deliberately left untouched.
   await db.update(usersTable).set({ passwordHash }).where(eq(usersTable.id, id));

@@ -5,7 +5,8 @@ import {
   RequestUploadUrlResponse,
 } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
-import { ObjectPermission } from "../lib/objectAcl";
+import { ObjectPermission, setObjectAclPolicy } from "../lib/objectAcl";
+import { requireAdmin, requireAuth } from "../lib/auth";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -17,7 +18,7 @@ const objectStorageService = new ObjectStorageService();
  * The client sends JSON metadata (name, size, contentType) — NOT the file.
  * Then uploads the file directly to the returned presigned URL.
  */
-router.post("/storage/uploads/request-url", async (req: Request, res: Response) => {
+router.post("/storage/uploads/request-url", requireAuth, async (req: Request, res: Response) => {
   const parsed = RequestUploadUrlBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Missing or invalid required fields" });
@@ -26,6 +27,10 @@ router.post("/storage/uploads/request-url", async (req: Request, res: Response) 
 
   try {
     const { name, size, contentType } = parsed.data;
+    if (size > 10 * 1024 * 1024 || !contentType.startsWith("image/")) {
+      res.status(400).json({ error: "Only image uploads up to 10 MB are allowed" });
+      return;
+    }
 
     const uploadURL = await objectStorageService.getObjectEntityUploadURL();
     const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
@@ -40,6 +45,25 @@ router.post("/storage/uploads/request-url", async (req: Request, res: Response) 
   } catch (error) {
     req.log.error({ err: error }, "Error generating upload URL");
     res.status(500).json({ error: "Failed to generate upload URL" });
+  }
+});
+
+router.post("/storage/objects/policy", requireAdmin, async (req: Request, res: Response) => {
+  const { objectPath, visibility } = req.body as { objectPath?: string; visibility?: string };
+  if (!objectPath || !objectPath.startsWith("/objects/") || visibility !== "public") {
+    res.status(400).json({ error: "Invalid object policy" });
+    return;
+  }
+  try {
+    const objectFile = await objectStorageService.getObjectEntityFile(objectPath);
+    await setObjectAclPolicy(objectFile, {
+      owner: String(req.session.userId),
+      visibility: "public",
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    req.log.error({ err: error }, "Error setting object policy");
+    res.status(404).json({ error: "Object not found" });
   }
 });
 
@@ -91,20 +115,17 @@ router.get("/storage/objects/*path", async (req: Request, res: Response) => {
     const objectPath = `/objects/${wildcardPath}`;
     const objectFile = await objectStorageService.getObjectEntityFile(objectPath);
 
-    // --- Protected route example (uncomment when using replit-auth) ---
-    // if (!req.isAuthenticated()) {
-    //   res.status(401).json({ error: "Unauthorized" });
-    //   return;
-    // }
-    // const canAccess = await objectStorageService.canAccessObjectEntity({
-    //   userId: req.user.id,
-    //   objectFile,
-    //   requestedPermission: ObjectPermission.READ,
-    // });
-    // if (!canAccess) {
-    //   res.status(403).json({ error: "Forbidden" });
-    //   return;
-    // }
+    const canAccess = await objectStorageService.canAccessObjectEntity({
+      userId: req.session.userId ? String(req.session.userId) : undefined,
+      objectFile,
+      requestedPermission: ObjectPermission.READ,
+    });
+    if (!canAccess) {
+      res.status(req.session.userId ? 403 : 401).json({
+        error: req.session.userId ? "Forbidden" : "Unauthorized",
+      });
+      return;
+    }
 
     const response = await objectStorageService.downloadObject(objectFile);
 

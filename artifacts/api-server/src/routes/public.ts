@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { barbersTable, barberHoursTable, galleryImagesTable, siteContentTable } from "@workspace/db/schema";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, inArray } from "drizzle-orm";
 
 const router = Router();
 
@@ -19,6 +19,7 @@ router.get("/barbers", async (req, res) => {
       ? await db
           .select()
           .from(barberHoursTable)
+          .where(inArray(barberHoursTable.barberId, barberIds))
           .orderBy(asc(barberHoursTable.dayOfWeek))
       : [];
 
