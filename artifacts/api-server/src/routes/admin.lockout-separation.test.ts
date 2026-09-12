@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SOURCE = readFileSync(resolve(__dirname, "admin.ts"), "utf-8");
+const AUTH_SOURCE = readFileSync(resolve(__dirname, "auth.ts"), "utf-8");
 
 // ---------------------------------------------------------------------------
 // Helpers: extract the body of each route handler from the source
@@ -106,6 +107,25 @@ function extractSetCallArgs(handlerSource: string): string {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+describe("login security invariants", () => {
+  test("uses a single generic failure response for invalid or locked credentials", () => {
+    const normalised = AUTH_SOURCE.replace(/\/\/.*$/gm, "").replace(/\s+/g, " ").trim();
+
+    assert.ok(
+      normalised.includes('res.status(401).json({ error: "Invalid username or password" })'),
+      "Expected the login route to use a single generic authentication failure response."
+    );
+    assert.ok(
+      !normalised.includes("if (!user)"),
+      "Login route must not branch on a missing user before returning the generic auth error."
+    );
+    assert.ok(
+      !normalised.includes("user.lockedUntil && user.lockedUntil > new Date()"),
+      "Login route must not expose a distinct locked-account branch."
+    );
+  });
+});
 
 describe("password reset endpoint (PUT /users/:id/password)", () => {
   const setArgs = extractSetCallArgs(PASSWORD_HANDLER);
